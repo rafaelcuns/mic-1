@@ -36,15 +36,15 @@ public class AluShifterDemo {
         System.out.println();
 
         System.out.println("--- TESTE 4: Verificação das Flags Z (Zero) e N (Negativo) ---");
-        alu.compute(20, 20, AluShifter.OP_SUB, AluShifter.SHIFT_NONE); // 20 - 20 = 0
+        alu.compute(20, 20, AluShifter.OP_SUB, AluShifter.SHIFT_NONE);
         System.out.printf("Operação 20 - 20: Saída = %d | Flag Z = %b (esperado: true) | Flag N = %b (esperado: false)%n",
                 alu.getAluOutput(), alu.isFlagZ(), alu.isFlagN());
 
-        alu.compute(30, 10, AluShifter.OP_SUB, AluShifter.SHIFT_NONE); // 10 - 30 = -20
+        alu.compute(30, 10, AluShifter.OP_SUB, AluShifter.SHIFT_NONE);
         System.out.printf("Operação 10 - 30: Saída = %d | Flag Z = %b (esperado: false) | Flag N = %b (esperado: true)%n",
                 alu.getAluOutput(), alu.isFlagZ(), alu.isFlagN());
 
-        alu.compute(5, 10, AluShifter.OP_SUB, AluShifter.SHIFT_NONE); // 10 - 5 = 5
+        alu.compute(5, 10, AluShifter.OP_SUB, AluShifter.SHIFT_NONE);
         System.out.printf("Operação 10 - 5 : Saída = %d | Flag Z = %b (esperado: false) | Flag N = %b (esperado: false)%n%n",
                 alu.getAluOutput(), alu.isFlagZ(), alu.isFlagN());
 
@@ -77,4 +77,3 @@ public class AluShifterDemo {
                 ok ? "OK" : "ERRO", desc, result, result, alu.isFlagZ() ? 1 : 0, alu.isFlagN() ? 1 : 0);
     }
 }
-

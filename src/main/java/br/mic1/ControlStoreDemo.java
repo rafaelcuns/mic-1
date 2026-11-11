@@ -24,17 +24,14 @@ public class ControlStoreDemo {
         System.out.printf("  B-Bus        : %d (B_PC)%n%n", ControlStore.getBBus(mirMain1));
 
         System.out.println("--- TESTE 2: Lógica de Próximo MPC (calculateNextMpc) ---");
-        // Teste 2.1: Despacho de Opcode via JMPC (Main1 saltando para IADD 0x60)
         int nextMpcIadd = ControlStore.calculateNextMpc(mirMain1, false, false, 0x60);
         System.out.printf("JMPC com MBR=0x60 (IADD)  -> Próximo MPC: 0x%03X (esperado: 0x060) -> %s%n",
                 nextMpcIadd, (nextMpcIadd == 0x060 ? "SUCESSO" : "FALHA"));
 
-        // Teste 2.2: Despacho de Opcode via JMPC (Main1 saltando para BIPUSH 0x10)
         int nextMpcBipush = ControlStore.calculateNextMpc(mirMain1, false, false, 0x10);
         System.out.printf("JMPC com MBR=0x10 (BIPUSH)-> Próximo MPC: 0x%03X (esperado: 0x010) -> %s%n",
                 nextMpcBipush, (nextMpcBipush == 0x010 ? "SUCESSO" : "FALHA"));
 
-        // Teste 2.3: Salto condicional via JAMZ (IFEQ - MPC 0x09C)
         long mirIfeqTest = cs.getInstruction(0x09C);
         int nextMpcZTrue  = ControlStore.calculateNextMpc(mirIfeqTest, true, false, 0);
         int nextMpcZFalse = ControlStore.calculateNextMpc(mirIfeqTest, false, false, 0);
@@ -70,4 +67,3 @@ public class ControlStoreDemo {
                 ControlStore.getCBus(mir), ControlStore.getBBus(mir));
     }
 }
-

@@ -2,28 +2,10 @@ package br.mic1;
 
 import java.util.Arrays;
 
-/**
- * Memória de Controle (Control Store / ROM de Microcódigo) do MIC-1 (Tanenbaum).
- *
- * <p>Armazena até 512 microinstruções de 36 bits cada, responsáveis por orquestrar
- * o Datapath da CPU a cada ciclo de clock. Cada microinstrução (armazenada no registrador MIR)
- * é composta por 6 campos fundamentais:</p>
- * <ul>
- *   <li><b>NEXT_ADDRESS</b> (bits 35-27, 9 bits): Endereço base da próxima microinstrução.</li>
- *   <li><b>JAM</b> (bits 26-24, 3 bits): Controle de desvio condicional (JAMZ, JAMN, JMPC).</li>
- *   <li><b>ALU & SHIFTER</b> (bits 23-16, 8 bits): SLL8, SRA1 e os 6 sinais de controle da ULA.</li>
- *   <li><b>C-BUS</b> (bits 15-7, 9 bits): Habilitação de escrita nos registradores (H, OPC, TOS, CPP, LV, SP, PC, MDR, MAR).</li>
- *   <li><b>MEMORY</b> (bits 6-4, 3 bits): Sinais de controle de memória (WRITE, READ, FETCH).</li>
- *   <li><b>B-BUS</b> (bits 3-0, 4 bits): Seleção do registrador que conduz dados para o Barramento B.</li>
- * </ul>
- */
 public class ControlStore {
 
     public static final int CAPACITY = 512;
 
-    // =========================================================================
-    // MÁSCARAS E DESLOCAMENTOS DOS CAMPOS DA MICROINSTRUÇÃO (36 BITS)
-    // =========================================================================
     public static final int SHIFT_NEXT_ADDRESS = 27;
     public static final long MASK_NEXT_ADDRESS = 0x1FFL;
 
@@ -37,7 +19,6 @@ public class ControlStore {
     public static final int SHIFT_ALU = 16;
     public static final long MASK_ALU = 0x3FL;
 
-    // C-Bus: escrita de registradores (bits 15-7)
     public static final int SHIFT_C_BUS = 7;
     public static final long MASK_C_BUS = 0x1FFL;
     public static final long C_H   = 1L << 15;
@@ -50,14 +31,12 @@ public class ControlStore {
     public static final long C_MDR = 1L << 8;
     public static final long C_MAR = 1L << 7;
 
-    // Sinais de Memória (bits 6-4)
     public static final int SHIFT_MEM = 4;
     public static final long MASK_MEM = 0x07L;
     public static final long MEM_WRITE = 1L << 6;
     public static final long MEM_READ  = 1L << 5;
     public static final long MEM_FETCH = 1L << 4;
 
-    // B-Bus: seleção de leitura (bits 3-0)
     public static final long MASK_B_BUS = 0x0FL;
     public static final int B_MDR  = 0;
     public static final int B_PC   = 1;
@@ -74,34 +53,21 @@ public class ControlStore {
 
     private final long[] rom;
 
-    /**
-     * Inicializa a Control Store com capacidade para 512 microinstruções e
-     * carrega o microprograma IJVM padrão de Tanenbaum.
-     */
     public ControlStore() {
         this.rom = new long[CAPACITY];
         loadDefaultMicroprogram();
     }
 
-    /**
-     * Retorna a microinstrução bruta de 36 bits armazenada no endereço MPC especificado.
-     */
     public long getInstruction(int mpc) {
         validateAddress(mpc);
         return rom[mpc];
     }
 
-    /**
-     * Armazena uma microinstrução no endereço fornecido.
-     */
     public void setInstruction(int mpc, long instruction) {
         validateAddress(mpc);
         rom[mpc] = instruction & 0xFFFFFFFFFL;
     }
 
-    /**
-     * Limpa todo o conteúdo da ROM.
-     */
     public void clear() {
         Arrays.fill(rom, 0L);
     }
@@ -167,15 +133,6 @@ public class ControlStore {
         return (int) (mir & MASK_B_BUS);
     }
 
-    /**
-     * Calcula o próximo endereço de microinstrução (MPC) segundo a lógica de desvio do MIC-1 (Fig. 4-5).
-     *
-     * @param mir Microinstrução atual
-     * @param flagZ Flag Zero da ULA
-     * @param flagN Flag Negativo da ULA
-     * @param mbr Conteúdo atual do registrador MBR (usado quando JMPC está ativo)
-     * @return O próximo endereço MPC (0 a 511)
-     */
     public static int calculateNextMpc(long mir, boolean flagZ, boolean flagN, int mbr) {
         int nextAddr = getNextAddress(mir);
         int highBit = nextAddr & 0x100;
@@ -192,9 +149,6 @@ public class ControlStore {
         return highBit | low8Bits;
     }
 
-    /**
-     * Monta uma microinstrução empacotada de 36 bits a partir dos sinais individuais.
-     */
     public static long buildInstruction(int nextAddress, boolean jamz, boolean jamn, boolean jmpc,
                                         int shiftCtrl, int aluCtrl, long cBusMask, long memMask, int bBus) {
         long mir = ((long) (nextAddress & 0x1FF)) << SHIFT_NEXT_ADDRESS;
@@ -214,9 +168,6 @@ public class ControlStore {
         return mir;
     }
 
-    /**
-     * Carrega o microprograma clássico IJVM de Tanenbaum (Fig. 4-17) na Control Store.
-     */
     public void loadDefaultMicroprogram() {
         clear();
 
