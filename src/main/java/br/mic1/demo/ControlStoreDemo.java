@@ -1,4 +1,7 @@
-package br.mic1;
+package br.mic1.demo;
+
+import br.mic1.AluShifter;
+import br.mic1.ControlStore;
 
 public class ControlStoreDemo {
 

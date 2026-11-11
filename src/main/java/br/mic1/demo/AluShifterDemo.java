@@ -1,4 +1,6 @@
-package br.mic1;
+package br.mic1.demo;
+
+import br.mic1.AluShifter;
 
 public class AluShifterDemo {
 

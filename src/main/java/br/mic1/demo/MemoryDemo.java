@@ -1,4 +1,7 @@
-package br.mic1;
+package br.mic1.demo;
+
+import br.mic1.Memory;
+import br.mic1.Cache;
 
 public class MemoryDemo {
 
