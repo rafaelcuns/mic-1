@@ -187,14 +187,6 @@ public class Cache {
         }
     }
 
-    @Deprecated
-    public int readByte(int byteAddress) {
-        int wordAddress = byteAddress >>> 1;
-        int offset = byteAddress & 0x01;
-        int word = read(wordAddress);
-        return offset == 0 ? (word >>> 8) & 0xFF : word & 0xFF;
-    }
-
     private void loadBlock(int address, CacheLine line, int tag) {
         int baseAddress = (address >>> offsetBits) << offsetBits;
         line.valid = true;

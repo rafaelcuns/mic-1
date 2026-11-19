@@ -1,148 +1,97 @@
 package br.mic1.demo;
 
+import br.mic1.ControlStore;
 import br.mic1.CpuMic1;
-import br.mic1.Memory;
 
 public class CpuMic1Demo {
 
     public static void main(String[] args) {
         System.out.println("================================================================================");
-        System.out.println("            SIMULADOR MIC-1 - ETAPA 4: NÚCLEO DA CPU E DATAPATH                 ");
+        System.out.println("      SIMULADOR MIC-1 (3ª EDIÇÃO) - ETAPA B: CPU MAC-1 COM 4 SUBCICLOS          ");
         System.out.println("================================================================================");
         System.out.println();
 
-        testProgram1();
+        testArithmeticWithSubcycles();
         System.out.println();
-        testProgram2();
+        testFibonacciFromMonitor();
 
         System.out.println("================================================================================");
-        System.out.println("                   ETAPA 4 CONCLUÍDA COM TOTAL SUCESSO!                         ");
-        System.out.println("       CpuMic1.java pronto para integração visual com JavaFX por Anna!          ");
+        System.out.println("                 ETAPA B CONCLUÍDA COM TOTAL SUCESSO!                           ");
         System.out.println("================================================================================");
     }
 
-    private static void testProgram1() {
-        System.out.println("--------------------------------------------------------------------------------");
-        System.out.println(" TESTE 1: Execução Aritmética Simples (BIPUSH 15 + BIPUSH 27 = 42 -> ISTORE 1) ");
-        System.out.println("--------------------------------------------------------------------------------");
-
+    private static void testArithmeticWithSubcycles() {
+        System.out.println("--- TESTE 1: Soma Simples (15 + 27 = 42) mostrando os 4 Subciclos do Ciclo 1 ---");
         String code = """
-            BIPUSH 15
-            BIPUSH 27
-            IADD
-            ISTORE 1
-            NOP
+            LOCO 15
+            STOD varA
+            LOCO 27
+            ADDD varA
+            STOD resultado
+            FIM: JUMP FIM
             """;
 
         CpuMic1 cpu = new CpuMic1();
         cpu.loadProgram(code);
 
-        System.out.printf("[ESTADO INICIAL] %s%n%n", cpu);
+        for (int s = 1; s <= 4; s++) {
+            cpu.stepSubcycle();
+            System.out.printf("  Subciclo %d -> MIR: 0x%08X | LatchA: 0x%04X | LatchB: 0x%04X | BusC: 0x%04X | MAR: 0x%03X | MPC: %d%n",
+                    cpu.getLastSubcycle(), cpu.getMir(), cpu.getLatchA(), cpu.getLatchB(), cpu.getBusC(), cpu.getMar(), cpu.getMpc());
+        }
 
-        System.out.println("Executando macroinstrução por macroinstrução (stepInstruction):");
-
-        // 1. BIPUSH 15
-        int cycles1 = cpu.stepInstruction();
-        System.out.printf("  1. BIPUSH 15 concluída em %d ciclos -> TOS: %d | SP: 0x%04X%n",
-                cycles1, cpu.getTos(), cpu.getSp());
-
-        // 2. BIPUSH 27
-        int cycles2 = cpu.stepInstruction();
-        System.out.printf("  2. BIPUSH 27 concluída em %d ciclos -> TOS: %d | SP: 0x%04X%n",
-                cycles2, cpu.getTos(), cpu.getSp());
-
-        // 3. IADD
-        int cycles3 = cpu.stepInstruction();
-        System.out.printf("  3. IADD      concluída em %d ciclos -> TOS: %d | SP: 0x%04X%n",
-                cycles3, cpu.getTos(), cpu.getSp());
-
-        // 4. ISTORE 1
-        int cycles4 = cpu.stepInstruction();
-        int var1Value = cpu.getMemory().read(cpu.getLv() + 1);
-        System.out.printf("  4. ISTORE 1  concluída em %d ciclos -> Variável 1 na Memória [0x%04X]: %d%n",
-                cycles4, cpu.getLv() + 1, var1Value);
-
-        // 5. NOP
-        int cycles5 = cpu.stepInstruction();
-        System.out.printf("  5. NOP       concluída em %d ciclos -> Ciclos totais: %d%n%n",
-                cycles5, cpu.getCycleCount());
-
-        boolean success = (var1Value == 42);
-        System.out.printf(">>> RESULTADO TESTE 1: %s (Valor da soma esperado: 42, obtido: %d)%n",
-                (success ? "SUCESSO" : "FALHA"), var1Value);
-
-        System.out.printf(">>> Estatísticas da I-Cache: %d acessos, %d hits (%.1f%%)%n",
-                cpu.getICache().getAccessCount(), cpu.getICache().getHitCount(), cpu.getICache().getHitRate());
-        System.out.printf(">>> Estatísticas da D-Cache: %d acessos, %d hits (%.1f%%)%n",
-                cpu.getDCache().getAccessCount(), cpu.getDCache().getHitCount(), cpu.getDCache().getHitRate());
-    }
-
-    private static void testProgram2() {
-        System.out.println("--------------------------------------------------------------------------------");
-        System.out.println(" TESTE 2: Execução de Laço Condicional (Somatório de 1 a 5 = 15 com IFEQ/GOTO) ");
-        System.out.println("--------------------------------------------------------------------------------");
-
-        String code = """
-            .var
-            i
-            sum
-            .end-var
-
-            BIPUSH 0
-            ISTORE sum
-
-            BIPUSH 5
-            ISTORE i
-
-            loop:
-            ILOAD i
-            IFEQ done
-            ILOAD sum
-            ILOAD i
-            IADD
-            ISTORE sum
-            ILOAD i
-            BIPUSH 1
-            ISUB
-            ISTORE i
-            GOTO loop
-
-            done:
-            NOP
-            """;
-
-        CpuMic1 cpu = new CpuMic1();
-        cpu.loadProgram(code);
-
-        // Executa até 10.000 ciclos ou atingir o NOP final
-        // Para parar ao final, executamos instruções até que PC alcance o NOP no label done
-        int maxInstructions = 1000;
-        int instructionsCount = 0;
-
-        while (instructionsCount < maxInstructions) {
+        for (int i = 0; i < 6; i++) {
             cpu.stepInstruction();
-            instructionsCount++;
-            // Quando atingir NOP no final do programa
-            if (cpu.getMbr() == 0x00 && cpu.getMpc() == br.mic1.ControlStore.ADDR_MAIN1) {
+        }
+
+        int varA = cpu.getMemory().read(6);
+        int resultado = cpu.getMemory().read(7);
+        System.out.printf("Resultado na memória -> varA [0x006] = %d | resultado [0x007] = %d (esperado: 42) -> %s%n",
+                varA, resultado, (resultado == 42 ? "SUCESSO" : "FALHA"));
+        System.out.printf("Cache L1: %d acessos, %d hits (%.1f%%)%n",
+                cpu.getCache().getAccessCount(), cpu.getCache().getHitCount(), cpu.getCache().getHitRate());
+    }
+
+    private static void testFibonacciFromMonitor() {
+        System.out.println("--- TESTE 2: Fibonacci na Pilha (Exemplo Oficial do Monitor) ---");
+        String code = """
+            START: LOCO 10
+            STOD var1
+            LOCO 1
+            STOD var2
+            LOCO 0
+            PUSH
+            LOCO 1
+            PUSH
+            LOOP: LODL 1
+            ADDL 0
+            PUSH
+            LODD var1
+            SUBD var2
+            STOD var1
+            JZER END
+            JUMP LOOP
+            END: JUMP END
+            """;
+
+        CpuMic1 cpu = new CpuMic1();
+        cpu.loadProgram(code);
+
+        int maxInst = 500;
+        for (int i = 0; i < maxInst; i++) {
+            int prevPc = cpu.getPc();
+            cpu.stepInstruction();
+            if (cpu.getPc() == prevPc) {
                 break;
             }
         }
 
-        int finalSum = cpu.getMemory().read(cpu.getLv() + 2); // sum é a 2ª variável
-        int finalI   = cpu.getMemory().read(cpu.getLv() + 1); // i é a 1ª variável
-
-        System.out.printf("[ESTADO FINAL] %s%n", cpu);
-        System.out.printf("  Total de Ciclos de Clock Executados : %d%n", cpu.getCycleCount());
-        System.out.printf("  Valor final da variável 'i'         : %d (esperado: 0)%n", finalI);
-        System.out.printf("  Valor final da variável 'sum'       : %d (esperado: 15)%n", finalSum);
-
-        boolean success = (finalSum == 15 && finalI == 0);
-        System.out.printf(">>> RESULTADO TESTE 2: %s (Somatório de 1 a 5 = %d)%n",
-                (success ? "SUCESSO" : "FALHA"), finalSum);
-
-        System.out.printf(">>> Estatísticas da I-Cache: %d acessos, %d hits (%.1f%%)%n",
-                cpu.getICache().getAccessCount(), cpu.getICache().getHitCount(), cpu.getICache().getHitRate());
-        System.out.printf(">>> Estatísticas da D-Cache: %d acessos, %d hits (%.1f%%)%n",
-                cpu.getDCache().getAccessCount(), cpu.getDCache().getHitCount(), cpu.getDCache().getHitRate());
+        int topFib = cpu.getMemory().read(cpu.getSp());
+        System.out.printf("Execução finalizada em %d ciclos (%d subciclos, %d instruções).%n",
+                cpu.getCycleCount(), cpu.getSubcycleCount(), cpu.getInstructionCount());
+        System.out.printf("Topo da pilha [SP=0x%03X] = %d (esperado: 89 para 10 iterações após 0, 1) -> %s%n",
+                cpu.getSp(), topFib, (topFib == 89 ? "SUCESSO" : "FALHA"));
+        System.out.printf("Cache L1: %d acessos, %d hits (%.1f%%)%n",
+                cpu.getCache().getAccessCount(), cpu.getCache().getHitCount(), cpu.getCache().getHitRate());
     }
 }

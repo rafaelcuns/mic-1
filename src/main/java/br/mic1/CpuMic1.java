@@ -1,41 +1,37 @@
 package br.mic1;
 
+import java.util.Arrays;
+
 public class CpuMic1 {
 
-    public static final int DEFAULT_PC  = 0x0000;
-    public static final int DEFAULT_LV  = 0x0100;
-    public static final int DEFAULT_SP  = 0x0110;
-    public static final int DEFAULT_CPP = 0x0080;
+    public static final int DEFAULT_PC = 0x000;
+    public static final int DEFAULT_SP = 0xFFC;
 
     private final Memory memory;
-    private final Cache iCache;
-    private final Cache dCache;
+    private final Cache cache;
     private final ControlStore controlStore;
     private final AluShifter aluShifter;
 
-    private int pc;
-    private int mbr;
-    private int sp;
-    private int lv;
-    private int cpp;
-    private int tos;
-    private int opc;
-    private int h;
+    private final int[] regs = new int[16];
     private int mar;
-    private int mdr;
-
+    private int mbr;
     private int mpc;
-    private long mir;
+    private int mir;
 
-    private int busA;
-    private int busB;
+    private int latchA;
+    private int latchB;
     private int busC;
     private boolean flagZ;
     private boolean flagN;
 
-    private Integer mbrHolding;
+    private int nextSubcycle;
+    private int lastSubcycle;
+    private boolean rdPending;
+    private boolean wrPending;
 
+    private long subcycleCount;
     private long cycleCount;
+    private long instructionCount;
     private boolean halted;
 
     public CpuMic1() {
@@ -44,26 +40,23 @@ public class CpuMic1 {
 
     public CpuMic1(Memory memory) {
         this(memory,
-             new Cache("I-Cache (Instruções)", 16, memory),
-             new Cache("D-Cache (Dados)", 16, memory),
+             new Cache("Cache L1", Cache.DEFAULT_LINES, Cache.DEFAULT_BLOCK_SIZE, memory),
              new ControlStore(),
              new AluShifter());
     }
 
-    public CpuMic1(Memory memory, Cache iCache, Cache dCache) {
-        this(memory, iCache, dCache, new ControlStore(), new AluShifter());
+    public CpuMic1(Memory memory, Cache cache) {
+        this(memory, cache, new ControlStore(), new AluShifter());
     }
 
-    public CpuMic1(Memory memory, Cache iCache, Cache dCache, ControlStore controlStore, AluShifter aluShifter) {
+    public CpuMic1(Memory memory, Cache cache, ControlStore controlStore, AluShifter aluShifter) {
         if (memory == null) throw new IllegalArgumentException("A memória principal não pode ser nula.");
-        if (iCache == null) throw new IllegalArgumentException("A I-Cache não pode ser nula.");
-        if (dCache == null) throw new IllegalArgumentException("A D-Cache não pode ser nula.");
+        if (cache == null) throw new IllegalArgumentException("A Cache L1 não pode ser nula.");
         if (controlStore == null) throw new IllegalArgumentException("A ControlStore não pode ser nula.");
         if (aluShifter == null) throw new IllegalArgumentException("O AluShifter não pode ser nulo.");
 
         this.memory = memory;
-        this.iCache = iCache;
-        this.dCache = dCache;
+        this.cache = cache;
         this.controlStore = controlStore;
         this.aluShifter = aluShifter;
 
@@ -74,314 +67,254 @@ public class CpuMic1 {
         reset(DEFAULT_PC);
     }
 
-    public void reset(int startByteAddress) {
-        this.pc = startByteAddress;
-        this.sp = DEFAULT_SP;
-        this.lv = DEFAULT_LV;
-        this.cpp = DEFAULT_CPP;
-        this.tos = 0;
-        this.opc = 0;
-        this.h = 0;
-        this.mar = 0;
-        this.mdr = 0;
+    public void reset(int startAddress) {
+        Arrays.fill(this.regs, 0);
+        this.regs[ControlStore.REG_PC]    = startAddress & 0x0FFF;
+        this.regs[ControlStore.REG_SP]    = DEFAULT_SP;
+        this.regs[ControlStore.REG_ZERO]  = 0x0000;
+        this.regs[ControlStore.REG_P1]    = 0x0001;
+        this.regs[ControlStore.REG_M1]    = 0xFFFF;
+        this.regs[ControlStore.REG_AMASK] = 0x0FFF;
+        this.regs[ControlStore.REG_SMASK] = 0x00FF;
 
-        this.busA = 0;
-        this.busB = 0;
+        this.mar = 0;
+        this.mbr = 0;
+        this.mpc = ControlStore.ADDR_FETCH;
+        this.mir = this.controlStore.getInstruction(this.mpc);
+
+        this.latchA = 0;
+        this.latchB = 0;
         this.busC = 0;
         this.flagZ = false;
         this.flagN = false;
 
+        this.nextSubcycle = 1;
+        this.lastSubcycle = 0;
+        this.rdPending = false;
+        this.wrPending = false;
+
+        this.subcycleCount = 0;
         this.cycleCount = 0;
+        this.instructionCount = 0;
         this.halted = false;
-        this.mbrHolding = null;
 
         this.aluShifter.reset();
-        this.iCache.reset();
-        this.dCache.reset();
+        this.cache.reset();
+    }
 
-        this.mbr = this.iCache.readByte(this.pc);
-        this.mpc = ControlStore.ADDR_MAIN1;
-        this.mir = this.controlStore.getInstruction(this.mpc);
+    public boolean stepSubcycle() {
+        if (halted) {
+            return false;
+        }
+
+        switch (nextSubcycle) {
+            case 1 -> executeSubcycle1();
+            case 2 -> executeSubcycle2();
+            case 3 -> executeSubcycle3();
+            case 4 -> executeSubcycle4();
+            default -> throw new IllegalStateException("Subciclo inválido: " + nextSubcycle);
+        }
+
+        lastSubcycle = nextSubcycle;
+        nextSubcycle = (nextSubcycle == 4) ? 1 : nextSubcycle + 1;
+        subcycleCount++;
+
+        return true;
+    }
+
+    private void executeSubcycle1() {
+        mir = controlStore.getInstruction(mpc);
+    }
+
+    private void executeSubcycle2() {
+        latchA = regs[ControlStore.getA(mir)] & 0xFFFF;
+        latchB = regs[ControlStore.getB(mir)] & 0xFFFF;
+    }
+
+    private void executeSubcycle3() {
+        int amux = ControlStore.getAmux(mir);
+        int alu  = ControlStore.getAlu(mir);
+        int sh   = ControlStore.getSh(mir);
+
+        busC = aluShifter.compute(latchA, latchB, mbr, amux, alu, sh);
+        flagZ = aluShifter.isFlagZ();
+        flagN = aluShifter.isFlagN();
+
+        if (ControlStore.hasMar(mir)) {
+            mar = latchB & 0x0FFF;
+        }
+    }
+
+    private void executeSubcycle4() {
+        if (ControlStore.hasEnc(mir)) {
+            int cReg = ControlStore.getC(mir);
+            if (isWritableRegister(cReg)) {
+                regs[cReg] = busC & 0xFFFF;
+            }
+        }
+
+        if (ControlStore.hasMbr(mir)) {
+            mbr = busC & 0xFFFF;
+        }
+
+        if (ControlStore.hasRd(mir)) {
+            if (rdPending) {
+                mbr = cache.read(mar & 0x0FFF) & 0xFFFF;
+                rdPending = false;
+            } else {
+                rdPending = true;
+            }
+        } else {
+            rdPending = false;
+        }
+
+        if (ControlStore.hasWr(mir)) {
+            if (wrPending) {
+                cache.write(mar & 0x0FFF, mbr & 0xFFFF);
+                wrPending = false;
+            } else {
+                wrPending = true;
+            }
+        } else {
+            wrPending = false;
+        }
+
+        mpc = ControlStore.calculateNextMpc(mpc, mir, flagZ, flagN);
+        cycleCount++;
+
+        if (mpc == ControlStore.ADDR_FETCH) {
+            instructionCount++;
+        }
+    }
+
+    private boolean isWritableRegister(int regIndex) {
+        return regIndex < ControlStore.REG_ZERO || regIndex > ControlStore.REG_SMASK;
     }
 
     public boolean step() {
         if (halted) {
             return false;
         }
-
-        mir = controlStore.getInstruction(mpc);
-        busA = h;
-
-        int bBusSel = ControlStore.getBBus(mir);
-        busB = switch (bBusSel) {
-            case ControlStore.B_MDR  -> mdr;
-            case ControlStore.B_PC   -> pc;
-            case ControlStore.B_MBR  -> (byte) (mbr & 0xFF);
-            case ControlStore.B_MBRU -> (mbr & 0xFF);
-            case ControlStore.B_SP   -> sp;
-            case ControlStore.B_LV   -> lv;
-            case ControlStore.B_CPP  -> cpp;
-            case ControlStore.B_TOS  -> tos;
-            case ControlStore.B_OPC  -> opc;
-            case ControlStore.B_NONE -> 0;
-            default                  -> 0;
-        };
-
-        if ((bBusSel == ControlStore.B_MBR || bBusSel == ControlStore.B_MBRU) && mbrHolding != null) {
-            mbr = mbrHolding;
-            mbrHolding = null;
-        }
-
-        int aluCtrl = ControlStore.getAlu(mir);
-        int shiftCtrl = ControlStore.getShift(mir);
-        busC = aluShifter.compute(busA, busB, aluCtrl, shiftCtrl);
-        flagZ = aluShifter.isFlagZ();
-        flagN = aluShifter.isFlagN();
-
-        if (ControlStore.hasWriteH(mir))   h   = busC;
-        if (ControlStore.hasWriteOpc(mir)) opc = busC;
-        if (ControlStore.hasWriteTos(mir)) tos = busC;
-        if (ControlStore.hasWriteCpp(mir)) cpp = busC;
-        if (ControlStore.hasWriteLv(mir))  lv  = busC;
-        if (ControlStore.hasWriteSp(mir))  sp  = busC;
-        if (ControlStore.hasWritePc(mir))  pc  = busC;
-        if (ControlStore.hasWriteMdr(mir)) mdr = busC;
-        if (ControlStore.hasWriteMar(mir)) mar = busC;
-
-        if (ControlStore.isJmpC(mir) && mbrHolding != null) {
-            mbr = mbrHolding;
-            mbrHolding = null;
-        }
-        int nextMpc = ControlStore.calculateNextMpc(mir, flagZ, flagN, mbr);
-
-        if (ControlStore.hasMemWrite(mir)) {
-            dCache.write(mar, mdr);
-        }
-
-        if (ControlStore.hasMemRead(mir)) {
-            mdr = dCache.read(mar);
-        }
-
-        if (ControlStore.hasMemFetch(mir)) {
-            int fetched = iCache.readByte(pc);
-            long nextMir = controlStore.getInstruction(nextMpc);
-            int nextBBus = ControlStore.getBBus(nextMir);
-
-            if (nextBBus == ControlStore.B_MBR || nextBBus == ControlStore.B_MBRU) {
-                mbrHolding = fetched;
-            } else {
-                mbr = fetched;
-                mbrHolding = null;
+        do {
+            if (!stepSubcycle()) {
+                return false;
             }
-        }
-
-        mpc = nextMpc;
-        cycleCount++;
-
+        } while (nextSubcycle != 1 && !halted);
         return true;
     }
 
     public int stepInstruction() {
-        if (halted) return 0;
-
-        int executed = 0;
+        if (halted) {
+            return 0;
+        }
+        int executedCycles = 0;
         do {
-            if (!step()) break;
-            executed++;
-        } while (mpc != ControlStore.ADDR_MAIN1 && !halted);
-
-        return executed;
+            if (!step()) {
+                break;
+            }
+            executedCycles++;
+        } while (mpc != ControlStore.ADDR_FETCH && !halted);
+        return executedCycles;
     }
 
     public long run(long maxCycles) {
         long count = 0;
         while (!halted && count < maxCycles) {
-            if (!step()) break;
+            if (!step()) {
+                break;
+            }
             count++;
         }
         return count;
     }
 
-    public void loadProgram(byte[] bytecode) {
-        loadProgram(bytecode, 0);
+    public void loadProgram(int[] words) {
+        loadProgram(words, DEFAULT_PC);
     }
 
-    public void loadProgram(byte[] bytecode, int startAddress) {
-        for (int i = 0; i < bytecode.length; i++) {
-            memory.writeByte(startAddress + i, bytecode[i] & 0xFF);
-        }
+    public void loadProgram(int[] words, int startAddress) {
+        memory.clear();
+        memory.loadWords(startAddress, words);
         reset(startAddress);
     }
 
-    public void loadProgram(String assemblySource) {
-        Assembler.assemble(assemblySource, memory, 0);
-        reset(0);
+    public int[] loadProgram(String assemblySource) {
+        memory.clear();
+        int[] words = Assembler.assemble(assemblySource, memory, DEFAULT_PC);
+        reset(DEFAULT_PC);
+        return words;
     }
 
-    public int getPc() {
-        return pc;
+    public int getRegister(int index) {
+        return regs[index] & 0xFFFF;
     }
 
-    public void setPc(int pc) {
-        this.pc = pc;
+    public int getRegisterSigned(int index) {
+        return (short) regs[index];
     }
 
-    public int getMbr() {
-        return mbr & 0xFF;
+    public void setRegister(int index, int value) {
+        if (isWritableRegister(index)) {
+            regs[index] = value & 0xFFFF;
+        }
     }
 
-    public int getMbrSigned() {
-        return (byte) (mbr & 0xFF);
+    public int[] getRegistersCopy() {
+        return Arrays.copyOf(regs, regs.length);
     }
 
-    public void setMbr(int mbr) {
-        this.mbr = mbr & 0xFF;
-    }
+    public int getPc()    { return regs[ControlStore.REG_PC] & 0xFFFF; }
+    public int getAc()    { return regs[ControlStore.REG_AC] & 0xFFFF; }
+    public int getAcSigned() { return (short) regs[ControlStore.REG_AC]; }
+    public int getSp()    { return regs[ControlStore.REG_SP] & 0xFFFF; }
+    public int getIr()    { return regs[ControlStore.REG_IR] & 0xFFFF; }
+    public int getTir()   { return regs[ControlStore.REG_TIR] & 0xFFFF; }
+    public int getRegA()  { return regs[ControlStore.REG_A] & 0xFFFF; }
+    public int getRegB()  { return regs[ControlStore.REG_B] & 0xFFFF; }
+    public int getRegC()  { return regs[ControlStore.REG_C] & 0xFFFF; }
+    public int getRegD()  { return regs[ControlStore.REG_D] & 0xFFFF; }
+    public int getRegE()  { return regs[ControlStore.REG_E] & 0xFFFF; }
+    public int getRegF()  { return regs[ControlStore.REG_F] & 0xFFFF; }
 
-    public int getSp() {
-        return sp;
-    }
+    public int getMar() { return mar & 0x0FFF; }
+    public int getMbr() { return mbr & 0xFFFF; }
+    public int getMpc() { return mpc & 0xFF; }
+    public int getMir() { return mir; }
 
-    public void setSp(int sp) {
-        this.sp = sp;
-    }
+    public int getLatchA() { return latchA & 0xFFFF; }
+    public int getLatchB() { return latchB & 0xFFFF; }
+    public int getBusC()   { return busC & 0xFFFF; }
 
-    public int getLv() {
-        return lv;
-    }
+    public int getAmuxOutput()    { return aluShifter.getAmuxOutput(); }
+    public int getAluOutput()     { return aluShifter.getAluOutput(); }
+    public int getShifterOutput() { return aluShifter.getShifterOutput(); }
 
-    public void setLv(int lv) {
-        this.lv = lv;
-    }
+    public boolean isFlagZ() { return flagZ; }
+    public boolean isFlagN() { return flagN; }
 
-    public int getCpp() {
-        return cpp;
-    }
+    public int getNextSubcycle() { return nextSubcycle; }
+    public int getLastSubcycle() { return lastSubcycle; }
+    public boolean isRdPending() { return rdPending; }
+    public boolean isWrPending() { return wrPending; }
 
-    public void setCpp(int cpp) {
-        this.cpp = cpp;
-    }
+    public long getSubcycleCount()    { return subcycleCount; }
+    public long getCycleCount()       { return cycleCount; }
+    public long getInstructionCount() { return instructionCount; }
 
-    public int getTos() {
-        return tos;
-    }
+    public Memory getMemory()             { return memory; }
+    public Cache getCache()               { return cache; }
+    public ControlStore getControlStore() { return controlStore; }
+    public AluShifter getAluShifter()     { return aluShifter; }
 
-    public void setTos(int tos) {
-        this.tos = tos;
-    }
-
-    public int getOpc() {
-        return opc;
-    }
-
-    public void setOpc(int opc) {
-        this.opc = opc;
-    }
-
-    public int getH() {
-        return h;
-    }
-
-    public void setH(int h) {
-        this.h = h;
-    }
-
-    public int getMar() {
-        return mar;
-    }
-
-    public void setMar(int mar) {
-        this.mar = mar;
-    }
-
-    public int getMdr() {
-        return mdr;
-    }
-
-    public void setMdr(int mdr) {
-        this.mdr = mdr;
-    }
-
-    public int getMpc() {
-        return mpc;
-    }
-
-    public void setMpc(int mpc) {
-        this.mpc = mpc;
-        this.mir = controlStore.getInstruction(mpc);
-    }
-
-    public long getMir() {
-        return mir;
-    }
-
-    public int getBusA() {
-        return busA;
-    }
-
-    public int getBusB() {
-        return busB;
-    }
-
-    public int getBusC() {
-        return busC;
-    }
-
-    public boolean isFlagZ() {
-        return flagZ;
-    }
-
-    public boolean isFlagN() {
-        return flagN;
-    }
-
-    public int getAluOutput() {
-        return aluShifter.getAluOutput();
-    }
-
-    public int getShifterOutput() {
-        return aluShifter.getShifterOutput();
-    }
-
-    public Memory getMemory() {
-        return memory;
-    }
-
-    public Cache getICache() {
-        return iCache;
-    }
-
-    public Cache getDCache() {
-        return dCache;
-    }
-
-    public ControlStore getControlStore() {
-        return controlStore;
-    }
-
-    public AluShifter getAluShifter() {
-        return aluShifter;
-    }
-
-    public long getCycleCount() {
-        return cycleCount;
-    }
-
-    public boolean isHalted() {
-        return halted;
-    }
-
-    public void setHalted(boolean halted) {
-        this.halted = halted;
-    }
-
-    public void halt() {
-        this.halted = true;
-    }
+    public boolean isHalted() { return halted; }
+    public void setHalted(boolean halted) { this.halted = halted; }
+    public void halt() { this.halted = true; }
 
     @Override
     public String toString() {
-        return String.format("[CPU MIC-1 | Ciclo: %d | MPC: 0x%03X | PC: 0x%04X | MBR: 0x%02X (%d) | SP: 0x%04X | TOS: 0x%08X (%d) | Z: %d | N: %d]",
-                cycleCount, mpc, pc, mbr & 0xFF, (byte) mbr, sp, tos, tos, flagZ ? 1 : 0, flagN ? 1 : 0);
+        return String.format(
+                "[MIC-1 3ª Ed | Ciclo: %d (Sub: %d) | MPC: %03d | PC: 0x%03X | AC: 0x%04X (%d) | SP: 0x%03X | IR: 0x%04X | Z:%d N:%d]",
+                cycleCount, lastSubcycle, mpc, getPc(), getAc(), getAcSigned(), getSp(), getIr(), flagZ ? 1 : 0, flagN ? 1 : 0
+        );
     }
 }

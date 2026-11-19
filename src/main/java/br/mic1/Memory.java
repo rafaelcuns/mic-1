@@ -45,25 +45,6 @@ public class Memory {
         }
     }
 
-    @Deprecated
-    public int readByte(int byteAddress) {
-        int wordAddress = byteAddress >>> 1;
-        int offset = byteAddress & 0x01;
-        int word = read(wordAddress);
-        return offset == 0 ? (word >>> 8) & 0xFF : word & 0xFF;
-    }
-
-    @Deprecated
-    public void writeByte(int byteAddress, int byteValue) {
-        int wordAddress = byteAddress >>> 1;
-        int offset = byteAddress & 0x01;
-        int word = read(wordAddress);
-        int updated = offset == 0
-                ? (word & 0x00FF) | ((byteValue & 0xFF) << 8)
-                : (word & 0xFF00) | (byteValue & 0xFF);
-        write(wordAddress, updated);
-    }
-
     public void clear() {
         Arrays.fill(words, 0);
     }
