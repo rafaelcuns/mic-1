@@ -28,6 +28,8 @@ public class CpuMic1 {
     private int lastSubcycle;
     private boolean rdPending;
     private boolean wrPending;
+    private String memoryStatus;
+    private int programSize;
 
     private long subcycleCount;
     private long cycleCount;
@@ -92,6 +94,7 @@ public class CpuMic1 {
         this.lastSubcycle = 0;
         this.rdPending = false;
         this.wrPending = false;
+        this.memoryStatus = "IDLE";
 
         this.subcycleCount = 0;
         this.cycleCount = 0;
@@ -157,12 +160,16 @@ public class CpuMic1 {
             mbr = busC & 0xFFFF;
         }
 
+        this.memoryStatus = "IDLE";
+
         if (ControlStore.hasRd(mir)) {
             if (rdPending) {
                 mbr = cache.read(mar & 0x0FFF) & 0xFFFF;
                 rdPending = false;
+                memoryStatus = "READ (" + cache.getLastAccessStatus() + ")";
             } else {
                 rdPending = true;
+                memoryStatus = "READ (Pendente)";
             }
         } else {
             rdPending = false;
@@ -172,8 +179,10 @@ public class CpuMic1 {
             if (wrPending) {
                 cache.write(mar & 0x0FFF, mbr & 0xFFFF);
                 wrPending = false;
+                memoryStatus = "WRITE (" + cache.getLastAccessStatus() + ")";
             } else {
                 wrPending = true;
+                memoryStatus = "WRITE (Pendente)";
             }
         } else {
             wrPending = false;
@@ -235,14 +244,22 @@ public class CpuMic1 {
     public void loadProgram(int[] words, int startAddress) {
         memory.clear();
         memory.loadWords(startAddress, words);
+        this.programSize = words.length;
         reset(startAddress);
     }
 
     public int[] loadProgram(String assemblySource) {
         memory.clear();
         int[] words = Assembler.assemble(assemblySource, memory, DEFAULT_PC);
+        this.programSize = words.length;
         reset(DEFAULT_PC);
         return words;
+    }
+
+    public void clearAll() {
+        memory.clear();
+        this.programSize = 0;
+        reset(DEFAULT_PC);
     }
 
     public int getRegister(int index) {
@@ -309,6 +326,50 @@ public class CpuMic1 {
     public boolean isHalted() { return halted; }
     public void setHalted(boolean halted) { this.halted = halted; }
     public void halt() { this.halted = true; }
+
+    public String getRegisterName(int index) {
+        return ControlStore.REG_NAMES[index];
+    }
+
+    public String getCurrentMicroinstructionText() {
+        return ControlStore.formatMicroinstruction(mir);
+    }
+
+    public String getCurrentInstructionText() {
+        return Assembler.disassembleWord(getIr());
+    }
+
+    public String getSubcycleDescription() {
+        return switch (lastSubcycle) {
+            case 1 -> "Subciclo 1/4: Busca da Microinstrução (MPC -> MIR)";
+            case 2 -> "Subciclo 2/4: Leitura dos Registradores (Latch A e Latch B)";
+            case 3 -> "Subciclo 3/4: Execução (AMUX -> ULA -> Shifter -> Bus C / MAR)";
+            case 4 -> "Subciclo 4/4: Escrita (C / MBR), Cache L1 e Próximo MPC";
+            default -> "Pronto para iniciar";
+        };
+    }
+
+    public String getMemoryStatus() {
+        return memoryStatus;
+    }
+
+    public int getProgramSize() {
+        return programSize;
+    }
+
+    public boolean hasLoadedProgram() {
+        return programSize > 0;
+    }
+
+    public int getActiveRegA() { return ControlStore.getA(mir); }
+    public int getActiveRegB() { return ControlStore.getB(mir); }
+    public int getActiveRegC() { return ControlStore.getC(mir); }
+    public boolean isWriteCActive() { return ControlStore.hasEnc(mir); }
+    public boolean isMarActive() { return ControlStore.hasMar(mir); }
+    public boolean isMbrWriteActive() { return ControlStore.hasMbr(mir); }
+    public boolean isAmuxMbrSelected() { return ControlStore.getAmux(mir) == AluShifter.AMUX_MBR; }
+    public boolean isMemReadActive() { return ControlStore.hasRd(mir); }
+    public boolean isMemWriteActive() { return ControlStore.hasWr(mir); }
 
     @Override
     public String toString() {

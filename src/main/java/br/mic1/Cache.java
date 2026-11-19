@@ -54,6 +54,18 @@ public class Cache {
             return Arrays.copyOf(words, words.length);
         }
 
+        public String getWordsHex() {
+            if (!valid) {
+                return "-";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < words.length; i++) {
+                if (i > 0) sb.append(" ");
+                sb.append(String.format("%04X", words[i] & 0xFFFF));
+            }
+            return sb.toString();
+        }
+
         public void invalidate() {
             this.valid = false;
             this.tag = 0;
@@ -306,5 +318,17 @@ public class Cache {
 
     public boolean isLastAccessHit() {
         return lastAccessHit;
+    }
+
+    public String getLastAccessStatus() {
+        if (accessCount == 0) {
+            return "IDLE";
+        }
+        return lastAccessHit ? "HIT" : "MISS";
+    }
+
+    public String getSummaryText() {
+        return String.format("Acessos: %d | Hits: %d (%.1f%%) | Misses: %d (%.1f%%)",
+                accessCount, hitCount, getHitRate(), missCount, getMissRate());
     }
 }

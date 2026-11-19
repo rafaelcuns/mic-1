@@ -31,6 +31,10 @@ public class Memory {
         return (short) read(address);
     }
 
+    public String readHex(int address) {
+        return String.format("%04X", read(address));
+    }
+
     public void write(int address, int value) {
         validateAddress(address);
         words[address] = value & WORD_MASK;
