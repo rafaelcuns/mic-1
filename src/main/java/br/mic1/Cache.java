@@ -1,22 +1,25 @@
 package br.mic1;
 
+import java.util.Arrays;
+
 public class Cache {
 
     public static final int DEFAULT_LINES = 16;
+    public static final int DEFAULT_BLOCK_SIZE = 4;
 
     public static class CacheLine {
         private final int index;
         private boolean valid;
         private int tag;
-        private int data;
-        private int address;
+        private int baseAddress;
+        private final int[] words;
 
-        public CacheLine(int index) {
+        public CacheLine(int index, int blockSize) {
             this.index = index;
             this.valid = false;
             this.tag = 0;
-            this.data = 0;
-            this.address = 0;
+            this.baseAddress = 0;
+            this.words = new int[blockSize];
         }
 
         public int getIndex() {
@@ -31,19 +34,31 @@ public class Cache {
             return tag;
         }
 
-        public int getData() {
-            return data;
+        public int getBaseAddress() {
+            return baseAddress;
         }
 
         public int getAddress() {
-            return address;
+            return baseAddress;
+        }
+
+        public int getData() {
+            return words[0];
+        }
+
+        public int getWord(int offset) {
+            return words[offset];
+        }
+
+        public int[] getWords() {
+            return Arrays.copyOf(words, words.length);
         }
 
         public void invalidate() {
             this.valid = false;
             this.tag = 0;
-            this.data = 0;
-            this.address = 0;
+            this.baseAddress = 0;
+            Arrays.fill(this.words, 0);
         }
 
         @Override
@@ -51,13 +66,21 @@ public class Cache {
             if (!valid) {
                 return String.format("[Linha %02d | Inválida]", index);
             }
-            return String.format("[Linha %02d | Tag: 0x%04X | Endereço: 0x%04X | Dado: 0x%08X (%d)]",
-                    index, tag, address, data, data);
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("[Linha %02d | Tag: 0x%03X | Base: 0x%03X | Palavras:", index, tag, baseAddress));
+            for (int w : words) {
+                sb.append(String.format(" 0x%04X", w & 0xFFFF));
+            }
+            sb.append("]");
+            return sb.toString();
         }
     }
 
     private final String name;
     private final int numLines;
+    private final int blockSize;
+    private final int offsetBits;
+    private final int offsetMask;
     private final int indexBits;
     private final int indexMask;
     private final Memory memory;
@@ -72,41 +95,54 @@ public class Cache {
     private int lastAccessAddress;
     private int lastAccessIndex;
     private int lastAccessTag;
+    private int lastAccessOffset;
     private boolean lastAccessHit;
 
     public Cache(String name, Memory memory) {
-        this(name, DEFAULT_LINES, memory);
+        this(name, DEFAULT_LINES, DEFAULT_BLOCK_SIZE, memory);
     }
 
     public Cache(String name, int numLines, Memory memory) {
+        this(name, numLines, 1, memory);
+    }
+
+    public Cache(String name, int numLines, int blockSize, Memory memory) {
         if (memory == null) {
             throw new IllegalArgumentException("A memória principal não pode ser nula.");
         }
         if (numLines <= 0 || (numLines & (numLines - 1)) != 0) {
             throw new IllegalArgumentException("O número de linhas da cache deve ser potência de 2: " + numLines);
         }
+        if (blockSize <= 0 || (blockSize & (blockSize - 1)) != 0) {
+            throw new IllegalArgumentException("O tamanho do bloco deve ser potência de 2: " + blockSize);
+        }
 
         this.name = name;
         this.numLines = numLines;
+        this.blockSize = blockSize;
+        this.offsetBits = Integer.numberOfTrailingZeros(blockSize);
+        this.offsetMask = blockSize - 1;
         this.indexBits = Integer.numberOfTrailingZeros(numLines);
         this.indexMask = numLines - 1;
         this.memory = memory;
 
         this.lines = new CacheLine[numLines];
         for (int i = 0; i < numLines; i++) {
-            this.lines[i] = new CacheLine(i);
+            this.lines[i] = new CacheLine(i, blockSize);
         }
 
         resetStats();
     }
 
-    public int read(int wordAddress) {
+    public int read(int address) {
         accessCount++;
         readCount++;
-        lastAccessAddress = wordAddress;
+        lastAccessAddress = address;
 
-        int index = calculateIndex(wordAddress);
-        int tag = calculateTag(wordAddress);
+        int offset = calculateOffset(address);
+        int index = calculateIndex(address);
+        int tag = calculateTag(address);
+        lastAccessOffset = offset;
         lastAccessIndex = index;
         lastAccessTag = tag;
 
@@ -115,54 +151,59 @@ public class Cache {
         if (line.valid && line.tag == tag) {
             hitCount++;
             lastAccessHit = true;
-            return line.data;
+            return line.words[offset] & Memory.WORD_MASK;
         } else {
             missCount++;
             lastAccessHit = false;
-
-            int fetchedData = memory.read(wordAddress);
-            line.valid = true;
-            line.tag = tag;
-            line.data = fetchedData;
-            line.address = wordAddress;
-
-            return fetchedData;
+            loadBlock(address, line, tag);
+            return line.words[offset] & Memory.WORD_MASK;
         }
     }
 
-    public void write(int wordAddress, int value) {
+    public void write(int address, int value) {
+        int maskedValue = value & Memory.WORD_MASK;
         accessCount++;
         writeCount++;
-        lastAccessAddress = wordAddress;
+        lastAccessAddress = address;
 
-        int index = calculateIndex(wordAddress);
-        int tag = calculateTag(wordAddress);
+        int offset = calculateOffset(address);
+        int index = calculateIndex(address);
+        int tag = calculateTag(address);
+        lastAccessOffset = offset;
         lastAccessIndex = index;
         lastAccessTag = tag;
 
-        memory.write(wordAddress, value);
+        memory.write(address, maskedValue);
 
         CacheLine line = lines[index];
         if (line.valid && line.tag == tag) {
             hitCount++;
             lastAccessHit = true;
-            line.data = value;
+            line.words[offset] = maskedValue;
         } else {
             missCount++;
             lastAccessHit = false;
-            line.valid = true;
-            line.tag = tag;
-            line.data = value;
-            line.address = wordAddress;
+            loadBlock(address, line, tag);
         }
     }
 
+    @Deprecated
     public int readByte(int byteAddress) {
-        int wordAddress = byteAddress >>> 2;
-        int byteOffset = byteAddress & 0x03;
+        int wordAddress = byteAddress >>> 1;
+        int offset = byteAddress & 0x01;
         int word = read(wordAddress);
-        int shift = (3 - byteOffset) * 8;
-        return (word >>> shift) & 0xFF;
+        return offset == 0 ? (word >>> 8) & 0xFF : word & 0xFF;
+    }
+
+    private void loadBlock(int address, CacheLine line, int tag) {
+        int baseAddress = (address >>> offsetBits) << offsetBits;
+        line.valid = true;
+        line.tag = tag;
+        line.baseAddress = baseAddress;
+        for (int i = 0; i < blockSize; i++) {
+            int wordAddr = baseAddress + i;
+            line.words[i] = (wordAddr < memory.getSize()) ? memory.read(wordAddr) : 0;
+        }
     }
 
     public void reset() {
@@ -181,6 +222,7 @@ public class Cache {
         lastAccessAddress = 0;
         lastAccessIndex = 0;
         lastAccessTag = 0;
+        lastAccessOffset = 0;
         lastAccessHit = false;
     }
 
@@ -190,12 +232,16 @@ public class Cache {
         }
     }
 
-    public int calculateIndex(int wordAddress) {
-        return wordAddress & indexMask;
+    public int calculateOffset(int address) {
+        return address & offsetMask;
     }
 
-    public int calculateTag(int wordAddress) {
-        return wordAddress >>> indexBits;
+    public int calculateIndex(int address) {
+        return (address >>> offsetBits) & indexMask;
+    }
+
+    public int calculateTag(int address) {
+        return address >>> (offsetBits + indexBits);
     }
 
     public String getName() {
@@ -204,6 +250,10 @@ public class Cache {
 
     public int getNumLines() {
         return numLines;
+    }
+
+    public int getBlockSize() {
+        return blockSize;
     }
 
     public Memory getMemory() {
@@ -256,6 +306,10 @@ public class Cache {
 
     public int getLastAccessTag() {
         return lastAccessTag;
+    }
+
+    public int getLastAccessOffset() {
+        return lastAccessOffset;
     }
 
     public boolean isLastAccessHit() {

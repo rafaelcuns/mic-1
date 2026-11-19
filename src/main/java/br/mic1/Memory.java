@@ -4,7 +4,8 @@ import java.util.Arrays;
 
 public class Memory {
 
-    public static final int DEFAULT_SIZE = 65536;
+    public static final int DEFAULT_SIZE = 4096;
+    public static final int WORD_MASK = 0xFFFF;
 
     private final int[] words;
     private final int size;
@@ -14,41 +15,53 @@ public class Memory {
     }
 
     public Memory(int sizeInWords) {
-        if (sizeInWords <= 0) {
-            throw new IllegalArgumentException("O tamanho da memória deve ser maior que zero: " + sizeInWords);
+        if (sizeInWords <= 0 || sizeInWords > 4096) {
+            throw new IllegalArgumentException("O tamanho da memória deve estar entre 1 e 4096 palavras: " + sizeInWords);
         }
         this.size = sizeInWords;
         this.words = new int[sizeInWords];
     }
 
-    public int read(int wordAddress) {
-        validateWordAddress(wordAddress);
-        return words[wordAddress];
+    public int read(int address) {
+        validateAddress(address);
+        return words[address] & WORD_MASK;
     }
 
-    public void write(int wordAddress, int value) {
-        validateWordAddress(wordAddress);
-        words[wordAddress] = value;
+    public int readSigned(int address) {
+        return (short) read(address);
     }
 
+    public void write(int address, int value) {
+        validateAddress(address);
+        words[address] = value & WORD_MASK;
+    }
+
+    public void loadWords(int startAddress, int[] data) {
+        if (data == null) {
+            throw new IllegalArgumentException("O vetor de palavras não pode ser nulo.");
+        }
+        for (int i = 0; i < data.length; i++) {
+            write(startAddress + i, data[i]);
+        }
+    }
+
+    @Deprecated
     public int readByte(int byteAddress) {
-        validateByteAddress(byteAddress);
-        int wordAddress = byteAddress >>> 2;
-        int byteOffset = byteAddress & 0x03;
-        int word = words[wordAddress];
-        int shift = (3 - byteOffset) * 8;
-        return (word >>> shift) & 0xFF;
+        int wordAddress = byteAddress >>> 1;
+        int offset = byteAddress & 0x01;
+        int word = read(wordAddress);
+        return offset == 0 ? (word >>> 8) & 0xFF : word & 0xFF;
     }
 
+    @Deprecated
     public void writeByte(int byteAddress, int byteValue) {
-        validateByteAddress(byteAddress);
-        int wordAddress = byteAddress >>> 2;
-        int byteOffset = byteAddress & 0x03;
-        int shift = (3 - byteOffset) * 8;
-        int mask = ~(0xFF << shift);
-        int val = (byteValue & 0xFF) << shift;
-
-        words[wordAddress] = (words[wordAddress] & mask) | val;
+        int wordAddress = byteAddress >>> 1;
+        int offset = byteAddress & 0x01;
+        int word = read(wordAddress);
+        int updated = offset == 0
+                ? (word & 0x00FF) | ((byteValue & 0xFF) << 8)
+                : (word & 0xFF00) | (byteValue & 0xFF);
+        write(wordAddress, updated);
     }
 
     public void clear() {
@@ -59,29 +72,15 @@ public class Memory {
         return size;
     }
 
-    public int getByteSize() {
-        return size * 4;
-    }
-
     public int[] getWordsCopy() {
         return Arrays.copyOf(words, words.length);
     }
 
-    private void validateWordAddress(int wordAddress) {
-        if (wordAddress < 0 || wordAddress >= size) {
+    private void validateAddress(int address) {
+        if (address < 0 || address >= size) {
             throw new IndexOutOfBoundsException(
-                String.format("Endereço de palavra fora dos limites da memória: 0x%X (tamanho: %d palavras)",
-                    wordAddress, size)
-            );
-        }
-    }
-
-    private void validateByteAddress(int byteAddress) {
-        int maxBytes = size * 4;
-        if (byteAddress < 0 || byteAddress >= maxBytes) {
-            throw new IndexOutOfBoundsException(
-                String.format("Endereço de byte fora dos limites da memória: 0x%X (tamanho: %d bytes)",
-                    byteAddress, maxBytes)
+                String.format("Endereço fora dos limites da memória: 0x%03X (tamanho: %d palavras)",
+                    address, size)
             );
         }
     }

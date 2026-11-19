@@ -1,108 +1,78 @@
 package br.mic1.demo;
 
-import br.mic1.Memory;
 import br.mic1.Cache;
+import br.mic1.Memory;
 
 public class MemoryDemo {
 
     public static void main(String[] args) {
         System.out.println("================================================================================");
-        System.out.println("          SIMULADOR MIC-1 - ETAPA 1: SISTEMA DE MEMÓRIA E CACHES L1            ");
+        System.out.println("        SIMULADOR MIC-1 (3ª EDIÇÃO) - ETAPA A: MEMÓRIA E CACHE L1 (16 BITS)     ");
         System.out.println("================================================================================");
         System.out.println();
 
-        Memory memory = new Memory(4096);
-        Cache dCache = new Cache("D-Cache (Dados)", 8, memory);
-        Cache iCache = new Cache("I-Cache (Instruções)", 8, memory);
+        Memory memory = new Memory();
+        Cache l1Cache = new Cache("Cache L1 (16 bits)", 8, 4, memory);
 
-        System.out.printf("[INFO] Memória Principal inicializada com %d palavras (%d bytes).%n",
-                memory.getSize(), memory.getByteSize());
-        System.out.printf("[INFO] D-Cache criada com %d linhas (Mapeamento Direto).%n", dCache.getNumLines());
-        System.out.printf("[INFO] I-Cache criada com %d linhas (Mapeamento Direto).%n%n", iCache.getNumLines());
+        System.out.printf("[INFO] Memória Principal inicializada com %d palavras de 16 bits (endereços 0x000 a 0x%03X).%n",
+                memory.getSize(), memory.getSize() - 1);
+        System.out.printf("[INFO] %s criada com %d linhas e blocos de %d palavras (Mapeamento Direto).%n%n",
+                l1Cache.getName(), l1Cache.getNumLines(), l1Cache.getBlockSize());
 
-        System.out.println("--- TESTE 1: Escrita Write-Through na D-Cache ---");
-        int testAddr1 = 0x000A;
-        int testVal1  = 0xCAFEBABE;
+        System.out.println("--- TESTE 1: Escrita Write-Through na Cache L1 ---");
+        int addr1 = 0x0010;
+        int val1 = 0x700A;
+        System.out.printf("Gravando 0x%04X no endereço 0x%03X via Cache L1...%n", val1, addr1);
+        l1Cache.write(addr1, val1);
 
-        System.out.printf("Gravando 0x%08X no endereço de palavra 0x%04X via D-Cache...%n", testVal1, testAddr1);
-        dCache.write(testAddr1, testVal1);
+        int memVal1 = memory.read(addr1);
+        System.out.printf("Verificação direta na RAM [0x%03X]: 0x%04X -> %s%n%n",
+                addr1, memVal1, (memVal1 == val1 ? "SUCESSO (Write-Through ativo)" : "FALHA"));
 
-        int memVal1 = memory.read(testAddr1);
-        System.out.printf("Verificação direta na Memória Principal [0x%04X]: 0x%08X -> %s%n%n",
-                testAddr1, memVal1, (memVal1 == testVal1 ? "SUCESSO (Write-Through ativo)" : "FALHA"));
+        System.out.println("--- TESTE 2: Localidade Espacial (Bloco de 4 Palavras) ---");
+        memory.write(0x0000, 0x7010);
+        memory.write(0x0001, 0x1020);
+        memory.write(0x0002, 0x7001);
+        memory.write(0x0003, 0x1021);
 
-        System.out.println("--- TESTE 2: Cold Miss e Cache Hit na D-Cache ---");
-        System.out.printf("1. Leitura 1 de [0x%04X]: 0x%08X (Hit? %b)%n",
-                testAddr1, dCache.read(testAddr1), dCache.isLastAccessHit());
-
-        int testAddr2 = 0x0002;
-        memory.write(testAddr2, 0x12345678);
-        System.out.printf("2. Leitura 1 de [0x%04X] (nunca acessado na cache): 0x%08X (Hit? %b)%n",
-                testAddr2, dCache.read(testAddr2), dCache.isLastAccessHit());
-
-        System.out.printf("3. Leitura 2 de [0x%04X] (agora residente na cache): 0x%08X (Hit? %b)%n%n",
-                testAddr2, dCache.read(testAddr2), dCache.isLastAccessHit());
+        for (int pc = 0; pc < 4; pc++) {
+            int word = l1Cache.read(pc);
+            System.out.printf("  PC = 0x%03X -> Palavra: 0x%04X | Hit? %s%n",
+                    pc, word, (l1Cache.isLastAccessHit() ? "SIM (HIT)" : "NÃO (MISS - carregou bloco de 4 palavras)"));
+        }
+        System.out.println();
 
         System.out.println("--- TESTE 3: Conflito de Linha (Mapeamento Direto) ---");
-        int indexAddr2  = dCache.calculateIndex(testAddr2);
-        int indexAddr10 = dCache.calculateIndex(testAddr1);
-        System.out.printf("Endereço 0x%04X -> Linha %d | Tag 0x%X%n", testAddr2, indexAddr2, dCache.calculateTag(testAddr2));
-        System.out.printf("Endereço 0x%04X -> Linha %d | Tag 0x%X%n", testAddr1, indexAddr10, dCache.calculateTag(testAddr1));
+        int addrA = 0x0000;
+        int addrB = 0x0020;
+        memory.write(addrB, 0x55AA);
+        System.out.printf("Endereço 0x%03X -> Linha %d | Tag 0x%X%n", addrA, l1Cache.calculateIndex(addrA), l1Cache.calculateTag(addrA));
+        System.out.printf("Endereço 0x%03X -> Linha %d | Tag 0x%X%n", addrB, l1Cache.calculateIndex(addrB), l1Cache.calculateTag(addrB));
 
-        System.out.println("Acessando 0x000A (substitui a tag do 0x0002 na Linha 2)...");
-        dCache.read(testAddr1);
-        System.out.printf("Linha 2 após acesso ao 0x000A: %s%n", dCache.getLine(2));
+        l1Cache.read(addrB);
+        System.out.printf("Após leitura de 0x%03X: %s%n", addrB, l1Cache.getLine(0));
+        l1Cache.read(addrA);
+        System.out.printf("Releitura de 0x%03X (Hit? %b - Conflict Miss esperado): %s%n%n",
+                addrA, l1Cache.isLastAccessHit(), l1Cache.getLine(0));
 
-        System.out.println("Acessando novamente 0x0002 (deve sofrer Conflict Miss por ter sido substituído)...");
-        dCache.read(testAddr2);
-        System.out.printf("Leitura de [0x%04X]: Hit? %b (Miss esperado devido ao conflito)%n",
-                testAddr2, dCache.isLastAccessHit());
-        System.out.printf("Linha 2 após reassumir 0x0002: %s%n%n", dCache.getLine(2));
-
-        System.out.println("--- TESTE 4: I-Cache - Leitura de Instruções IJVM (Localidade Espacial) ---");
-        memory.writeByte(0, 0x10);
-        memory.writeByte(1, 0x05);
-        memory.writeByte(2, 0x60);
-        memory.writeByte(3, 0x00);
-
-        System.out.println("Buscando 4 bytes sequenciais do fluxo de instruções via I-Cache (PC = 0, 1, 2, 3):");
-        for (int pc = 0; pc < 4; pc++) {
-            int b = iCache.readByte(pc);
-            System.out.printf("  PC = %d -> Opcode/Byte: 0x%02X | Hit na I-Cache? %s%n",
-                    pc, b, (iCache.isLastAccessHit() ? "SIM (HIT)" : "NÃO (MISS - carregou a palavra inteira)"));
-        }
-        System.out.println("-> Note que o byte 0 gerou 1 MISS (trouxe os 4 bytes da memória),");
-        System.out.println("   e os bytes 1, 2 e 3 geraram 3 HITS consecutivos (localidade espacial)!\n");
-
-        printCacheReport(dCache);
-        printCacheReport(iCache);
+        printCacheReport(l1Cache);
 
         System.out.println("================================================================================");
-        System.out.println("                   ETAPA 1 EXECUTADA COM SUCESSO!                              ");
-        System.out.println("   Classes Memory.java e Cache.java prontas para integração por Francisco!      ");
+        System.out.println("               ETAPA A (MEMÓRIA E CACHE 16 BITS) CONCLUÍDA!                     ");
         System.out.println("================================================================================");
     }
 
     private static void printCacheReport(Cache cache) {
-        System.out.println("=======================================================");
+        System.out.println("=================================================================");
         System.out.printf(" RELATÓRIO DE STATUS: %s%n", cache.getName());
-        System.out.println("=======================================================");
-        System.out.println("Linha | Val |  Tag   | Endereço | Dado (Hex)   | Dado (Dec)");
-        System.out.println("------+-----+--------+----------+--------------+-----------");
+        System.out.println("=================================================================");
         for (Cache.CacheLine line : cache.getLines()) {
-            if (line.isValid()) {
-                System.out.printf("  %02d  |  1  | 0x%04X |  0x%04X  |  0x%08X  | %d%n",
-                        line.getIndex(), line.getTag(), line.getAddress(), line.getData(), line.getData());
-            } else {
-                System.out.printf("  %02d  |  0  | ------ |  ------  |  ----------  | -----%n", line.getIndex());
-            }
+            System.out.println("  " + line);
         }
-        System.out.println("------+-----+--------+----------+--------------+-----------");
-        System.out.printf("Total de Acessos : %d%n", cache.getAccessCount());
-        System.out.printf("Total de Leituras: %d%n", cache.getReadCount());
-        System.out.printf("Total de Escritas: %d%n", cache.getWriteCount());
+        System.out.println("-----------------------------------------------------------------");
+        System.out.printf("Total de Acessos : %d (Leituras: %d | Escritas: %d)%n",
+                cache.getAccessCount(), cache.getReadCount(), cache.getWriteCount());
         System.out.printf("Hits             : %d (%.2f%%)%n", cache.getHitCount(), cache.getHitRate());
-        System.out.printf("Misses           : %d (%.2f%%)%n", cache.getMissCount(), cache.getMissRate());
-        System.out.println();
+        System.out.printf("Misses           : %d (%.2f%%)%n%n", cache.getMissCount(), cache.getMissRate());
     }
 }
