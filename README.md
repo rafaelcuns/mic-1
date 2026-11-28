@@ -3,49 +3,53 @@ Projeto simulador de MIC-1 para disciplina de Arquitetura de Computadores do pro
 
 ## Tecnologias
 
-- **Java 21 (JDK 21)** 
+- **Java 21 (JDK 21)**
 - **JavaFX 21.0.2:** Interface gráfica
 - **Apache Maven 3.9.9:** Dependências, build e execução
-- **Docker:** Containerização da aplicação gráfica
+- **Docker & Docker Compose:** Containerização da aplicação gráfica (X11/GTK)
 
-## Instalação e execução
+## Como Clonar e Executar via Docker
 
-### 1. Instalar Java JDK 21
+### 1. Clonar o repositório
 
-```powershell
-winget install --id Microsoft.OpenJDK.21 -e
+```bash
+git clone <URL_DO_REPOSITORIO>
+cd mic-1
 ```
 
-### 2. Instalar Maven 3.9.9
+### 2. Executar com Docker Compose
 
-```powershell
-$mavenVersion = "3.9.9"
-$mavenUrl = "https://archive.apache.org/dist/maven/maven-3/$mavenVersion/binaries/apache-maven-$mavenVersion-bin.zip"
-$installDir = "$env:LOCALAPPDATA\Programs"
-$zipPath = "$env:TEMP\maven.zip"
-
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-Invoke-WebRequest -Uri $mavenUrl -OutFile $zipPath
-Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
-Remove-Item $zipPath
-
-$javaHome = "C:\Program Files\Microsoft\jdk-21.0.13.21-hotspot"
-[Environment]::SetEnvironmentVariable("JAVA_HOME", $javaHome, "User")
-
-$mavenBin = "$installDir\apache-maven-$mavenVersion\bin"
-$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-[Environment]::SetEnvironmentVariable("Path", "$javaHome\bin;$mavenBin;$currentPath", "User")
+**Linux / Windows (WSL2 com WSLg):**
+```bash
+xhost +local:docker
+docker compose up --build
 ```
 
-### 3. Validar instalção
-
+**Windows (PowerShell sem WSLg, usando [VcXsrv](https://sourceforge.net/projects/vcxsrv/)):**
+1. Abra o **XLaunch** (VcXsrv) e marque a opção **"Disable access control"**.
+2. Execute no PowerShell:
 ```powershell
-java -version
-mvn -version
+docker compose up --build
 ```
 
-### 4. Executar
+### Alternativa: Executar com Docker CLI (`docker build` / `docker run`)
 
-```powershell
-mvn clean javafx:run
+**1. Construir a imagem:**
+```bash
+docker build -t mic1-sim .
 ```
+
+**2. Executar a interface gráfica:**
+
+* **Linux / WSL2 (WSLg):**
+  ```bash
+  xhost +local:docker
+  docker run --rm -it \
+    -e DISPLAY=$DISPLAY \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    mic1-sim
+  ```
+* **Windows (PowerShell com VcXsrv ativo):**
+  ```powershell
+  docker run --rm -it -e DISPLAY=host.docker.internal:0.0 mic1-sim
+  ```
